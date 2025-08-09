@@ -1,276 +1,65 @@
-<!DOCTYPE html>
-<html lang="ar" dir="rtl">
+<!doctype html>
+<html lang="ar">
 <head>
-<meta charset="UTF-8">
-<title>محرك شطرنج يتعلم</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<style>
-body {
-    font-family: system-ui, sans-serif;
-    margin: 0;
-    background: #f5f5f5;
-    color: #222;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: 10px;
-}
-h1 {
-    margin: 10px 0;
-    font-size: 1.4em;
-}
-.board {
-    display: grid;
-    grid-template-columns: repeat(8, 1fr);
-    max-width: 100vmin;
-    border: 2px solid #444;
-}
-.sq {
-    aspect-ratio: 1;
-    font-size: calc(100vmin / 10);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border: none;
-    padding: 0;
-    cursor: pointer;
-    user-select: none;
-}
-.light { background: #f0d9b5; }
-.dark { background: #b58863; }
-.controls {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    justify-content: center;
-    margin-top: 10px;
-}
-.controls button {
-    padding: 6px 10px;
-    border: none;
-    border-radius: 4px;
-    background: #1976d2;
-    color: white;
-    cursor: pointer;
-    font-size: 0.9em;
-}
-.controls button:hover {
-    background: #1565c0;
-}
-aside {
-    margin-top: 12px;
-    font-size: 0.85em;
-    background: #fff;
-    padding: 8px;
-    border-radius: 6px;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.1);
-    width: 100%;
-    max-width: 400px;
-}
-.row {
-    display: flex;
-    justify-content: space-between;
-    margin-bottom: 4px;
-}
-.small {
-    font-size: 0.85em;
-}
-</style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ChessZero Web</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <!-- chess.js (for game logic convenience) -->
+  <script src="https://cdn.jsdelivr.net/npm/chess.js@1.0.0-beta.2/dist/chess.js"></script>
+  <!-- TensorFlow.js -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.11.0/dist/tf.min.js"></script>
 </head>
-<body>
-<h1>♟ محرك شطرنج يتعلم</h1>
+<body dir="rtl">
+  <div class="app">
+    <header>
+      <h1>ChessZero Web</h1>
+      <div class="controls">
+        <button id="newGameBtn">جديدة</button>
+        <button id="undoBtn">تراجع</button>
+        <button id="trainBtn">تحسين أداء الذكاء الاصطناعي</button>
+        <label>
+          اللون:
+          <select id="sideSelect">
+            <option value="white">أبيض</option>
+            <option value="black">أسود</option>
+          </select>
+        </label>
+      </div>
+    </header>
 
-<!-- لوحة الشطرنج -->
-<div id="board" class="board" role="grid" aria-label="لوح الشطرنج"></div>
+    <main>
+      <section class="board-area">
+        <div id="board" class="board" aria-label="رقعة الشطرنج"></div>
+      </section>
 
-<div class="controls">
-    <button id="newBtn">لعبة جديدة</button>
-    <button id="engineMoveBtn">حركة المحرك</button>
-    <button id="undoBtn">تراجع</button>
-    <button id="toggleEngineBtn">إيقاف المحرك</button>
-    <button id="flipBtn">قلب اللوح</button>
-    <button id="resetBookBtn">حذف خبرة</button>
-    <button id="exportBtn">تصدير</button>
-    <button id="importBtn">استيراد</button>
-    <input id="fileInput" type="file" accept="application/json" style="display:none" />
-</div>
+      <aside class="sidebar">
+        <div class="captured">
+          <h3>القطع المأسورة</h3>
+          <div id="capturedWhite"></div>
+          <div id="capturedBlack"></div>
+        </div>
 
-<aside>
-    <div class="row"><div>الحالة:</div><div id="status">-</div></div>
-    <div class="row"><div>آخر نتيجة:</div><div id="lastResult">-</div></div>
-    <div class="row"><div>عدد مواضع الخبرة:</div><div id="bookSize">0</div></div>
-    <div style="margin-top:6px">
-        المحرك مبسّط: يتعلّم من كل مباراة ويخزن في <code>localStorage</code>. المحرك يلعب الأسود. ترقية تلقائية إلى الملكة.
-    </div>
-</aside>
+        <div class="moves">
+          <h3>سجل الحركات</h3>
+          <pre id="movesLog"></pre>
+        </div>
 
-<script src="https://cdn.jsdelivr.net/npm/chess.js@1.0.0-beta.2/dist/chess.min.js"></script>
-<script>
-const PIECE_UNICODE = {
-    'p': {'w':'♙','b':'♟'},
-    'r': {'w':'♖','b':'♜'},
-    'n': {'w':'♘','b':'♞'},
-    'b': {'w':'♗','b':'♝'},
-    'q': {'w':'♕','b':'♛'},
-    'k': {'w':'♔','b':'♚'}
-};
+        <div class="ai-status">
+          <h3>حالة الذكاء الاصطناعي</h3>
+          <p id="aiStatus">غير محمّل</p>
+        </div>
+      </aside>
+    </main>
 
-class LearningEngine {
-    constructor(){
-        this.storageKey = 'chess_learning_book_v1';
-        this.epsilon = 0.18;
-        this.learningRate = 1;
-        this.book = this._load();
-        this.currentMoves = [];
-    }
-    _load(){
-        try{ const raw = localStorage.getItem(this.storageKey); return raw ? JSON.parse(raw) : {}; }
-        catch(e){console.error(e); return {};}
-    }
-    _save(){ try{ localStorage.setItem(this.storageKey, JSON.stringify(this.book)); }catch(e){console.error(e);} }
-    chooseMove(chess){
-        const moves = chess.moves({verbose:true});
-        if (moves.length === 0) return null;
-        const fen = chess.fen();
-        if (Math.random() < this.epsilon){
-            const m = moves[Math.floor(Math.random()*moves.length)];
-            const key = m.san || (m.from + m.to);
-            this.currentMoves.push({fen,move:key});
-            return key;
-        }
-        const row = this.book[fen] || {};
-        let best=null, bestScore=-Infinity;
-        for (const m of moves){
-            const key = m.san || (m.from + m.to);
-            const sc = row[key] ?? 0;
-            const score = sc + Math.random()*0.01;
-            if (score>bestScore){ bestScore=score; best=key; }
-        }
-        if (!best){ const m = moves[0]; best = m.san || (m.from + m.to); }
-        this.currentMoves.push({fen,move:best});
-        return best;
-    }
-    onGameEnd(result){
-        let delta=0; if (result==='win') delta=this.learningRate; else if (result==='loss') delta=-this.learningRate;
-        for (const r of this.currentMoves){
-            if (!this.book[r.fen]) this.book[r.fen]={};
-            if (!this.book[r.fen][r.move]) this.book[r.fen][r.move]=0;
-            this.book[r.fen][r.move]+=delta;
-        }
-        this.currentMoves = [];
-        this._save();
-    }
-    export(){ return JSON.stringify(this.book); }
-    import(json){ try{ this.book = JSON.parse(json); this._save(); }catch(e){throw e;} }
-    reset(){ this.book = {}; this._save(); }
-    size(){ return Object.keys(this.book).length; }
-}
+    <footer>
+      <small>مشروع مفتوح المصدر — ChessZero Web</small>
+    </footer>
+  </div>
 
-const chess = new Chess();
-const engine = new LearningEngine();
-const boardEl = document.getElementById('board');
-const statusEl = document.getElementById('status');
-const lastResultEl = document.getElementById('lastResult');
-const bookSizeEl = document.getElementById('bookSize');
-
-let orientation = 'white';
-let selected = null;
-let engineOn = true;
-
-function renderBoard(){
-    boardEl.innerHTML = '';
-    const ranks = orientation==='white' ? [8,7,6,5,4,3,2,1] : [1,2,3,4,5,6,7,8];
-    const files = orientation==='white' ? ['a','b','c','d','e','f','g','h'] : ['h','g','f','e','d','c','b','a'];
-    for (let r of ranks){
-        for (let f of files){
-            const sq = f + r;
-            const p = chess.get(sq);
-            const fileIdx = files.indexOf(f);
-            const rankIdx = ranks.indexOf(r);
-            const light = (fileIdx + rankIdx) % 2 === 0;
-            const div = document.createElement('button');
-            div.className = 'sq ' + (light? 'light':'dark');
-            div.dataset.square = sq;
-            div.textContent = p ? PIECE_UNICODE[p.type][p.color] : '';
-            div.addEventListener('click', onSquareClick);
-            boardEl.appendChild(div);
-        }
-    }
-    bookSizeEl.textContent = engine.size();
-}
-
-function onSquareClick(e){
-    const sq = e.currentTarget.dataset.square;
-    if (selected){
-        const move = chess.move({from:selected,to:sq,promotion:'q'});
-        selected = null; renderBoard();
-        if (move){ checkGameOver(); if (engineOn) setTimeout(engineMove, 200); }
-        return;
-    }
-    const p = chess.get(sq);
-    if (p && p.color === 'w'){
-        selected = sq;
-    }
-}
-
-function engineMove(){
-    if (chess.game_over()) return;
-    if (chess.turn() !== 'b') return;
-    const mv = engine.chooseMove(chess);
-    if (!mv) return;
-    chess.move(mv, {sloppy:true});
-    renderBoard(); checkGameOver();
-}
-
-function checkGameOver(){
-    if (chess.isCheckmate()){
-        const winner = chess.turn() === 'w' ? 'black' : 'white';
-        statusEl.textContent = 'كش مات — الفائز: ' + winner;
-        const result = (winner === 'black') ? 'win' : 'loss';
-        engine.onGameEnd(result);
-        lastResultEl.textContent = result;
-        bookSizeEl.textContent = engine.size();
-    } else if (chess.isDraw() || chess.isStalemate() || chess.isInsufficientMaterial()){
-        statusEl.textContent = 'تعادل';
-        engine.onGameEnd('draw');
-        lastResultEl.textContent = 'draw';
-        bookSizeEl.textContent = engine.size();
-    } else {
-        statusEl.textContent = chess.turn() === 'w' ? 'دور الأبيض' : 'دور الأسود';
-    }
-}
-
-document.getElementById('newBtn').addEventListener('click', ()=>{
-    chess.reset(); engine.currentMoves=[]; selected=null;
-    renderBoard(); statusEl.textContent=''; lastResultEl.textContent='-';
-});
-document.getElementById('engineMoveBtn').addEventListener('click', engineMove);
-document.getElementById('undoBtn').addEventListener('click', ()=>{ chess.undo(); renderBoard(); });
-document.getElementById('toggleEngineBtn').addEventListener('click', (e)=>{
-    engineOn = !engineOn; e.target.textContent = engineOn ? 'إيقاف المحرك' : 'تشغيل المحرك';
-});
-document.getElementById('flipBtn').addEventListener('click', ()=>{
-    orientation = orientation==='white' ? 'black' : 'white'; renderBoard();
-});
-document.getElementById('resetBookBtn').addEventListener('click', ()=>{
-    if (confirm('حذف خبرة المحرك؟')){ engine.reset(); renderBoard(); alert('تم الحذف'); }
-});
-document.getElementById('exportBtn').addEventListener('click', ()=>{
-    const data = engine.export();
-    if (navigator.clipboard){ navigator.clipboard.writeText(data).then(()=> alert('تم النسخ')); }
-    else { const w = window.open('about:blank','_blank'); w.document.write('<pre>'+escapeHtml(data)+'</pre>'); }
-});
-document.getElementById('importBtn').addEventListener('click', ()=>{ document.getElementById('fileInput').click(); });
-document.getElementById('fileInput').addEventListener('change', async (ev)=>{
-    const f = ev.target.files[0]; if (!f) return; const txt = await f.text();
-    try{ engine.import(txt); alert('تم الاستيراد'); renderBoard(); }catch(e){ alert('خطأ في الملف'); }
-});
-
-function escapeHtml(s){ return s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
-
-renderBoard();
-checkGameOver();
-window.addEventListener('resize', () => renderBoard());
-</script>
+  <script type="module" src="js/main.js"></script>
+  <script src="js/chess-logic.js"></script>
+  <script src="js/ai-engine.js"></script>
+  <script src="js/neural-network.js"></script>
 </body>
 </html>
